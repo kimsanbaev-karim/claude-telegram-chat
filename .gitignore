@@ -1,0 +1,8 @@
+.env
+*.log
+.venv/
+__pycache__/
+*.pyc
+icon.png
+inbox/
+media/

@@ -1,0 +1,6 @@
+python-telegram-bot>=22.7
+pystray>=0.19
+pillow>=10.0
+pywin32>=306
+fastmcp>=2.0
+python-dotenv>=1.0
