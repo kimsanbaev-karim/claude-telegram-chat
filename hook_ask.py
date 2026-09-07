@@ -1,4 +1,4 @@
-"""Хук PreToolUse: вопрос агента уходит Кариму в Telegram кнопками, ответ возвращается модели.
+"""Хук PreToolUse: вопрос агента уходит в Telegram кнопками, ответ возвращается модели.
 
 Claude Code показывает модели permissionDecisionReason при отказе — туда и подставляется
 выбор. Приём тот же, что в старом мосте (ask_user.py): ответ человека инжектится
@@ -13,6 +13,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import NoReturn
 
 from dotenv import load_dotenv
 
@@ -26,11 +27,11 @@ ANSWER_TIMEOUT_SECONDS = 1500
 TOOL_NAME = "AskUserQuestion"
 
 
-def allow() -> None:
+def allow() -> NoReturn:
     sys.exit(0)
 
 
-def deny(reason: str) -> None:
+def deny(reason: str) -> NoReturn:
     payload = {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
@@ -71,8 +72,8 @@ def main() -> None:
     try:
         answer = ask.wait_answer(question_id, thread, ANSWER_TIMEOUT_SECONDS)
     except TimeoutError as error:
-        deny(f"Вопрос ушёл Кариму в Telegram, но ответа нет: {error}. Спроси его в терминале.")
-    deny(f"Карим ответил в Telegram: {answer}")
+        deny(f"Вопрос ушёл в Telegram, но ответа нет: {error}. Спроси в терминале.")
+    deny(f"Ответ из Telegram: {answer}")
 
 
 if __name__ == "__main__":

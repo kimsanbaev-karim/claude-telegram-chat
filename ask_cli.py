@@ -1,4 +1,4 @@
-"""Спросить Карима кнопками в теме его сессии и напечатать выбранный вариант.
+"""Спросить человека кнопками в теме его сессии и напечатать выбранный вариант.
 
 Нужна хукам: они запускаются системным python, а зависимости канала живут в venv
 проекта, поэтому хук вызывает этот файл интерпретатором venv и читает stdout.
@@ -6,7 +6,7 @@
     ask_cli.py --session <id> --question "текст" --option "Да" --option "Нет"
 
 Печатает выбранный вариант и выходит с кодом 0. Если сессия не привязана к теме
-или Карим не ответил — код 2 и пустой stdout: вызывающий сам решает, что делать,
+или ответа не было — код 2 и пустой stdout: вызывающий сам решает, что делать,
 и обычно возвращается к обычному диалогу в терминале.
 """
 
@@ -36,7 +36,7 @@ def session_thread(session_id: str) -> int:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="спросить Карима кнопками в Telegram")
+    parser = argparse.ArgumentParser(description="спросить человека кнопками в Telegram")
     parser.add_argument("--session", required=True, help="id сессии Claude")
     parser.add_argument("--question", required=True, help="текст вопроса")
     parser.add_argument("--option", action="append", required=True, help="вариант ответа, можно повторять")

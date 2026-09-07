@@ -26,6 +26,9 @@ def describe(raw: str) -> str:
         parts.append(f"| в ответ на #{entry['reply_to']}")
     if "media" in entry:
         parts.append(f"| файл: {entry['media']}")
+    if "frames" in entry:
+        frames = entry["frames"]
+        parts.append(f"| кадры ({len(frames)} шт.): {Path(frames[0]).parent}")
     if "error" in entry:
         parts.append(f"| ОШИБКА: {entry['error']}")
     return " ".join(parts)

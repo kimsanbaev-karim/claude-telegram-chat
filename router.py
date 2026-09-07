@@ -14,11 +14,13 @@ from pathlib import Path
 from typing import cast
 
 from dotenv import load_dotenv
-from telegram import CallbackQuery, Message, ReactionTypeEmoji, Update, Voice
+from telegram import Animation, Audio, CallbackQuery, Document, Message, PhotoSize, ReactionTypeEmoji
+from telegram import Update, Video, VideoNote, Voice
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
 import ask
+import media
 import state
 
 WHISPER_TIMEOUT_SECONDS = 300
@@ -29,6 +31,19 @@ READ_TIMEOUT = 30.0
 POLL_READ_TIMEOUT = 60.0
 POOL_TIMEOUT = 20.0
 
+MediaFile = Video | Animation | VideoNote | Voice | Audio | Document
+KIND_BY_TYPE = {
+    Video: ("video", ".mp4"),
+    Animation: ("animation", ".mp4"),
+    VideoNote: ("video_note", ".mp4"),
+    Voice: ("voice", ".ogg"),
+    Audio: ("audio", ".mp3"),
+}
+DOCUMENT_KINDS = (("video/", "video"), ("audio/", "audio"), ("image/", "photo"))
+VIDEO_KINDS = frozenset({"video", "animation", "video_note"})
+AUDIO_KINDS = frozenset({"voice", "audio"})
+MEDIA_ERRORS = (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired)
+
 
 class Settings:
     def __init__(self) -> None:
@@ -38,6 +53,7 @@ class Settings:
         self.state_dir = Path(os.environ.get("AI_PAIR_STATE_DIR", Path.home() / ".claude-telegram-chat"))
         self.inbox_dir = self.state_dir / "inbox"
         self.media_dir = self.state_dir / "media"
+        self.frames_dir = self.state_dir / "frames"
 
 
 def require_env(name: str) -> str:
@@ -70,14 +86,39 @@ def quoted_fields(message: Message) -> dict:
     return {"reply_to": quoted}
 
 
+def document_kind(document: Document) -> tuple[str, str]:
+    """Присланный файлом ролик остаётся роликом, а песня песней: вид берём из mime."""
+    suffix = Path(f"{document.file_name}").suffix
+    mime = f"{document.mime_type}"
+    for prefix, kind in DOCUMENT_KINDS:
+        if mime.startswith(prefix) is True:
+            return kind, suffix
+    return "file", suffix
+
+
+def attachment(message: Message) -> tuple[str, str, str]:
+    """Вид вложения, его file_id и расширение, под которым оно ляжет на диск."""
+    found = message.effective_attachment
+    if isinstance(found, tuple):
+        sizes = cast(tuple[PhotoSize, ...], found)
+        return "photo", sizes[-1].file_id, ".jpg"
+    if isinstance(found, Document):
+        kind, suffix = document_kind(found)
+        return kind, found.file_id, suffix
+    single = cast(MediaFile, found)
+    kind, suffix = KIND_BY_TYPE[type(single)]
+    return kind, single.file_id, suffix
+
+
 def transcribe(audio_path: Path) -> str:
     python = require_env("AI_PAIR_WHISPER_PYTHON")
     script = require_env("AI_PAIR_WHISPER_SCRIPT")
     command = [python, script, str(audio_path)]
-    done = subprocess.run(command, capture_output=True, timeout=WHISPER_TIMEOUT_SECONDS)
+    speaking = os.environ | {"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
+    done = subprocess.run(command, capture_output=True, timeout=WHISPER_TIMEOUT_SECONDS, env=speaking)
     if done.returncode != 0:
         raise RuntimeError(done.stderr.decode("utf-8", "replace").strip()[:400])
-    return done.stdout.decode("utf-8", "replace").strip()
+    return done.stdout.decode("utf-8").replace("\r\n", "\n").strip()
 
 
 class Router:
@@ -129,29 +170,40 @@ class Router:
         if "question_id" in waiting:
             ask.record_answer(waiting["question_id"], text)
 
-    async def on_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        message = cast(Message, update.effective_message)
-        image = await self.download(context, message.photo[-1].file_id, ".jpg")
-        self.append(message, {"kind": "photo", "media": str(image), "text": ""})
-        await self.mark_seen(context, message)
-
-    async def on_captioned_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        message = cast(Message, update.effective_message)
-        image = await self.download(context, message.photo[-1].file_id, ".jpg")
-        self.append(message, {"kind": "photo", "media": str(image), "text": cast(str, message.caption)})
-        await self.mark_seen(context, message)
-
-    async def on_voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        message = cast(Message, update.effective_message)
-        audio = await self.download(context, cast(Voice, message.voice).file_id, ".ogg")
-        entry: dict = {"kind": "voice", "media": str(audio)}
+    def add_frames(self, entry: dict, path: Path) -> None:
+        """Ролик агент открыть не может, поэтому от него остаются равномерные кадры."""
         try:
-            entry["text"] = transcribe(audio)
-        except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
-            entry["text"] = ""
+            frames = media.extract_frames(path, self.settings.frames_dir / path.stem)
+        except MEDIA_ERRORS as error:
+            entry["error"] = f"кадры не извлеклись: {error}"
+            return
+        entry["frames"] = [str(frame) for frame in frames]
+
+    def add_speech(self, entry: dict, path: Path) -> None:
+        try:
+            spoken = transcribe(path)
+        except MEDIA_ERRORS as error:
             entry["error"] = f"распознавание не удалось: {error}"
+            return
+        entry["text"] = "\n".join(part for part in (entry["text"], spoken) if len(part) > 0)
+
+    async def take(self, context: ContextTypes.DEFAULT_TYPE, message: Message, caption: str) -> None:
+        kind, file_id, suffix = attachment(message)
+        path = await self.download(context, file_id, suffix)
+        entry: dict = {"kind": kind, "media": str(path), "text": caption}
+        if kind in VIDEO_KINDS:
+            self.add_frames(entry, path)
+        if kind in AUDIO_KINDS:
+            self.add_speech(entry, path)
         self.append(message, entry)
         await self.mark_seen(context, message)
+
+    async def on_attachment(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await self.take(context, cast(Message, update.effective_message), "")
+
+    async def on_captioned_attachment(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        message = cast(Message, update.effective_message)
+        await self.take(context, message, cast(str, message.caption))
 
 
 def main() -> None:
@@ -164,10 +216,11 @@ def main() -> None:
     polling_client = HTTPXRequest(connect_timeout=CONNECT_TIMEOUT, read_timeout=POLL_READ_TIMEOUT, pool_timeout=POOL_TIMEOUT)
     builder = Application.builder().token(settings.token).request(api_client).get_updates_request(polling_client)
     application = builder.build()
+    attachments = filters.PHOTO | filters.VIDEO | filters.ANIMATION | filters.VIDEO_NOTE
+    attachments = attachments | filters.VOICE | filters.AUDIO | filters.Document.ALL
     application.add_handler(MessageHandler(scope & filters.TEXT, router.on_text))
-    application.add_handler(MessageHandler(scope & filters.VOICE, router.on_voice))
-    application.add_handler(MessageHandler(scope & filters.PHOTO & filters.CAPTION, router.on_captioned_photo))
-    application.add_handler(MessageHandler(scope & filters.PHOTO & ~filters.CAPTION, router.on_photo))
+    application.add_handler(MessageHandler(scope & attachments & filters.CAPTION, router.on_captioned_attachment))
+    application.add_handler(MessageHandler(scope & attachments & ~filters.CAPTION, router.on_attachment))
     application.add_handler(CallbackQueryHandler(router.on_choice))
 
     sys.stderr.write(f"router: слушаю чат {settings.chat_id}, ленты в {settings.inbox_dir}\n")

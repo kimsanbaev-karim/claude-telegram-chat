@@ -1,4 +1,4 @@
-"""Вопрос с кнопками в тему задачи и ожидание выбора Карима.
+"""Вопрос с кнопками в тему задачи и ожидание выбора человека.
 
 Хук PreToolUse перехватывает AskUserQuestion, зовёт post_question, ждёт wait_answer
 и отдаёт выбор модели через permissionDecisionReason. Нажатие ловит router: он
@@ -75,7 +75,7 @@ def wait_answer(question_id: str, thread: int, timeout_seconds: float) -> str:
             return answer
         time.sleep(POLL_SECONDS)
     waiting_path(thread).unlink(missing_ok=True)
-    raise TimeoutError(f"Карим не ответил за {int(timeout_seconds)} с")
+    raise TimeoutError(f"ответа из Telegram нет {int(timeout_seconds)} с")
 
 
 def record_answer(question_id: str, answer: str) -> None:

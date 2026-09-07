@@ -49,6 +49,7 @@ async def send(thread: int, text: str, voice: str, reply_to: int = 0, photo: str
                 raise SystemExit(f"reply: файл {audio} не найден")
             with audio.open("rb") as handle:
                 await bot.send_voice(chat_id, handle, caption=text[:1024], message_thread_id=thread, reply_to_message_id=quoted)
+            await clear_seen(bot, chat_id, thread)
             return
         if len(photo) > 0:
             image = Path(photo)
@@ -56,6 +57,7 @@ async def send(thread: int, text: str, voice: str, reply_to: int = 0, photo: str
                 raise SystemExit(f"reply: файл {image} не найден")
             with image.open("rb") as handle:
                 await bot.send_photo(chat_id, handle, caption=text[:1024], message_thread_id=thread, reply_to_message_id=quoted)
+            await clear_seen(bot, chat_id, thread)
             return
         for part in chunks(text):
             await bot.send_message(chat_id, part, message_thread_id=thread, reply_to_message_id=quoted)
@@ -72,7 +74,7 @@ def main() -> None:
     parser.add_argument("--thread", type=int, required=True, help="message_thread_id темы проекта")
     parser.add_argument("--voice", default="", help="путь к .ogg, чтобы отправить голосовым, а не документом")
     parser.add_argument("--photo", default="", help="путь к картинке: уйдёт фото, текст станет подписью")
-    parser.add_argument("--reply-to", type=int, default=0, dest="reply_to", help="message_id реплики Карима: ответ уйдёт цитатой")
+    parser.add_argument("--reply-to", type=int, default=0, dest="reply_to", help="message_id входящего сообщения: ответ уйдёт цитатой")
     args = parser.parse_args()
     load_dotenv(PROJECT_DIR / ".env")
     asyncio.run(send(args.thread, read_stdin_text(), args.voice, args.reply_to, args.photo))

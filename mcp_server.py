@@ -43,7 +43,7 @@ def remember_task(name: str, thread: int) -> int:
 
 @mcp.tool
 def reply(thread: int, text: str) -> str:
-    """Отправить сообщение Кариму в тему задачи. Длинный текст режется на части сам."""
+    """Отправить сообщение в тему задачи. Длинный текст режется на части сам."""
     load_dotenv(PROJECT_DIR / ".env")
     asyncio.run(replying.send(thread, text, ""))
     return "отправлено"
@@ -51,7 +51,7 @@ def reply(thread: int, text: str) -> str:
 
 @mcp.tool
 def ask(thread: int, question: str, options: list[str], timeout_seconds: int = 1500) -> str:
-    """Задать Кариму вопрос кнопками в тему задачи и дождаться выбора.
+    """Задать вопрос кнопками в тему задачи и дождаться выбора.
 
     Возвращает выбранный вариант. Свободный текст в теме тоже считается ответом:
     не всякий ответ укладывается в предложенные варианты.
