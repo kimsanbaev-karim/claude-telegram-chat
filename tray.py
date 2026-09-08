@@ -49,18 +49,19 @@ def write_log(message: str) -> None:
         handle.write(f"[трей {stamp()}] {message}\n")
 
 
-class RouterSupervisor:
-    def __init__(self) -> None:
+class ProcessSupervisor:
+    def __init__(self, name: str, command: list[str], workdir: Path) -> None:
+        self.name = name
+        self.command = command
+        self.workdir = workdir
         self.stopping = threading.Event()
         self.process = self.spawn()
         threading.Thread(target=self.watch, daemon=True).start()
 
     def spawn(self) -> subprocess.Popen:
-        write_log("запускаю router")
-        python = PROJECT_DIR / ".venv" / "Scripts" / "python.exe"
-        command = [str(python), "-X", "utf8", str(PROJECT_DIR / "router.py")]
+        write_log(f"запускаю {self.name}")
         log = LOG_PATH.open("a", encoding="utf-8", buffering=1)
-        return subprocess.Popen(command, cwd=PROJECT_DIR, stdout=log, stderr=log, creationflags=subprocess.CREATE_NO_WINDOW)
+        return subprocess.Popen(self.command, cwd=self.workdir, stdout=log, stderr=log, creationflags=subprocess.CREATE_NO_WINDOW)
 
     def watch(self) -> None:
         while self.stopping.is_set() is False:
@@ -70,7 +71,7 @@ class RouterSupervisor:
                 continue
             if self.stopping.is_set() is True:
                 return
-            write_log(f"router завершился с кодом {code}, перезапуск через {RESTART_DELAY_SECONDS} с")
+            write_log(f"{self.name} завершился с кодом {code}, перезапуск через {RESTART_DELAY_SECONDS} с")
             time.sleep(RESTART_DELAY_SECONDS)
             self.process = self.spawn()
 
@@ -84,20 +85,28 @@ class RouterSupervisor:
         self.process.terminate()
 
 
+def start_supervisors() -> list[ProcessSupervisor]:
+    router_python = PROJECT_DIR / ".venv" / "Scripts" / "python.exe"
+    router = [str(router_python), "-X", "utf8", str(PROJECT_DIR / "router.py")]
+    return [ProcessSupervisor("router", router, PROJECT_DIR)]
+
+
 def main() -> None:
     ensure_single_instance()
     load_dotenv(PROJECT_DIR / ".env")
     check_env()
-    supervisor = RouterSupervisor()
+    supervisors = start_supervisors()
 
     def on_open_log(icon, item) -> None:
         os.startfile(LOG_PATH)
 
     def on_restart(icon, item) -> None:
-        supervisor.restart()
+        for supervisor in supervisors:
+            supervisor.restart()
 
     def on_quit(icon, item) -> None:
-        supervisor.stop()
+        for supervisor in supervisors:
+            supervisor.stop()
         icon.stop()
 
     items = (

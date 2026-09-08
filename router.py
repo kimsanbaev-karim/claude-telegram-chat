@@ -8,6 +8,8 @@ import json
 import os
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -23,6 +25,7 @@ import ask
 import media
 import state
 
+WHISPER_DEFAULT_URL = "http://127.0.0.1:8792"
 WHISPER_TIMEOUT_SECONDS = 300
 GENERAL_THREAD = "general"
 SEEN_REACTION = [ReactionTypeEmoji("👀")]
@@ -111,14 +114,18 @@ def attachment(message: Message) -> tuple[str, str, str]:
 
 
 def transcribe(audio_path: Path) -> str:
-    python = require_env("AI_PAIR_WHISPER_PYTHON")
-    script = require_env("AI_PAIR_WHISPER_SCRIPT")
-    command = [python, script, str(audio_path)]
-    speaking = os.environ | {"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
-    done = subprocess.run(command, capture_output=True, timeout=WHISPER_TIMEOUT_SECONDS, env=speaking)
-    if done.returncode != 0:
-        raise RuntimeError(done.stderr.decode("utf-8", "replace").strip()[:400])
-    return done.stdout.decode("utf-8").replace("\r\n", "\n").strip()
+    """Просит резидентный сервис: модель у него уже в памяти, поэтому ответ за секунды."""
+    service = os.environ.get("AI_PAIR_WHISPER_URL", WHISPER_DEFAULT_URL)
+    body = json.dumps({"audio": str(audio_path)}).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    call = urllib.request.Request(f"{service}/transcribe", data=body, headers=headers)
+    try:
+        with urllib.request.urlopen(call, timeout=WHISPER_TIMEOUT_SECONDS) as answer:
+            return json.loads(answer.read().decode("utf-8"))["text"].strip()
+    except urllib.error.HTTPError as error:
+        raise RuntimeError(error.read().decode("utf-8", "replace").strip()[:400]) from error
+    except urllib.error.URLError as error:
+        raise RuntimeError(f"сервис распознавания не отвечает на {service}: {error.reason}") from error
 
 
 class Router:
