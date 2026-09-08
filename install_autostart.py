@@ -17,8 +17,18 @@ from pathlib import Path
 
 import win32com.client
 
+from icon import assets_dir, make_icon_image
+
 PROJECT_DIR = Path(__file__).resolve().parent
 SHORTCUT_NAME = "Канал Telegram-Claude (трей).lnk"
+ICON_SIZES = [(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
+
+
+def icon_file() -> Path:
+    path = assets_dir() / "channel.ico"
+    if path.is_file() is False:
+        make_icon_image().save(path, sizes=ICON_SIZES)
+    return path
 
 
 def special_folder(name: str) -> Path:
@@ -39,6 +49,7 @@ def create(folder: str) -> None:
     link.TargetPath = str(target)
     link.Arguments = "tray.py"
     link.WorkingDirectory = str(PROJECT_DIR)
+    link.IconLocation = str(icon_file())
     link.Description = "Канал между Telegram и сессиями Claude Code"
     link.Save()
     print(f"ярлык создан: {shortcut_path(folder)}")
