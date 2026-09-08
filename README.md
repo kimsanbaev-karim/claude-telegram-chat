@@ -151,6 +151,7 @@ claude mcp add --scope user claude-telegram-chat -- <путь>/.venv/Scripts/pyt
 ```
 .venv/Scripts/python.exe bind.py --name "проект#задача" --session <id сессии>
 .venv/Scripts/python.exe follow.py --thread <id темы>     под Monitor
+.venv/Scripts/python.exe follow.py --thread general       лента General
 echo текст | .venv/Scripts/python.exe reply.py --thread <id темы>
 echo текст | .venv/Scripts/python.exe reply.py                  без --thread — в General
 ```

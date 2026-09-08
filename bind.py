@@ -20,6 +20,7 @@ from telegram import Bot
 from telegram.request import HTTPXRequest
 
 PROJECT_DIR = Path(__file__).resolve().parent
+GENERAL_THREAD = 0
 CONNECT_TIMEOUT = 20.0
 READ_TIMEOUT = 30.0
 POOL_TIMEOUT = 20.0
@@ -82,11 +83,18 @@ def bind(name: str) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="получить message_thread_id темы задачи")
-    parser.add_argument("--name", required=True, help="имя темы, принято `проект#задача`")
+    parser.add_argument("--name", default="", help="имя темы, принято `проект#задача`")
     parser.add_argument("--thread", type=int, default=0, help="уже найденный id темы: только запомнить его")
     parser.add_argument("--session", default="", help="id сессии Claude: привязать её к теме для хука вопросов")
+    parser.add_argument("--general", action="store_true", help="привязать сессию к General: темы нет, ключ ленты general")
     args = parser.parse_args()
     load_dotenv(PROJECT_DIR / ".env")
+    if args.general is True:
+        attach_session(args.session, GENERAL_THREAD)
+        print(GENERAL_THREAD)
+        return
+    if len(args.name) == 0:
+        raise SystemExit("bind: нужно --name темы или --general")
     thread_id = args.thread
     if thread_id > 0:
         remember(args.name, thread_id)

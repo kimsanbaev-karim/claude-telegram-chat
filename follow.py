@@ -56,7 +56,7 @@ def follow(path: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="следить за лентой темы для Monitor")
-    parser.add_argument("--thread", required=True, help="message_thread_id темы проекта")
+    parser.add_argument("--thread", required=True, help="ключ ленты: message_thread_id темы проекта или general")
     args = parser.parse_args()
     follow(lane_path(args.thread))
 
