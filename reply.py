@@ -18,6 +18,7 @@ import state
 
 PROJECT_DIR = Path(__file__).resolve().parent
 TELEGRAM_TEXT_LIMIT = 4096
+TELEGRAM_CAPTION_LIMIT = 1024
 GENERAL_LANE = "general"
 
 
@@ -39,6 +40,16 @@ def chunks(text: str) -> list[str]:
     return [text[start:start + TELEGRAM_TEXT_LIMIT] for start in range(0, len(text), TELEGRAM_TEXT_LIMIT)]
 
 
+def split_caption(text: str) -> tuple[str, str]:
+    """Подпись к медиа Telegram обрезает по 1024 символа, поэтому хвост уходит отдельными сообщениями."""
+    if len(text) <= TELEGRAM_CAPTION_LIMIT:
+        return text, ""
+    edge = text.rfind("\n\n", 0, TELEGRAM_CAPTION_LIMIT)
+    if edge < TELEGRAM_CAPTION_LIMIT // 3:
+        edge = text.rfind(" ", 0, TELEGRAM_CAPTION_LIMIT)
+    return text[:edge].strip(), text[edge:].strip()
+
+
 def lane_key(thread: int) -> str:
     """Ключ ленты: у темы это её id, у General — общее имя, как его пишет router."""
     if thread > 0:
@@ -57,16 +68,22 @@ async def send(thread: int, text: str, voice: str, reply_to: int = 0, photo: str
             audio = Path(voice)
             if audio.is_file() is False:
                 raise SystemExit(f"reply: файл {audio} не найден")
+            caption, rest = split_caption(text)
             with audio.open("rb") as handle:
-                await bot.send_voice(chat_id, handle, caption=text[:1024], message_thread_id=topic, reply_to_message_id=quoted)
+                await bot.send_voice(chat_id, handle, caption=caption, message_thread_id=topic, reply_to_message_id=quoted)
+            for part in chunks(rest):
+                await bot.send_message(chat_id, part, message_thread_id=topic)
             await clear_seen(bot, chat_id, lane)
             return
         if len(photo) > 0:
             image = Path(photo)
             if image.is_file() is False:
                 raise SystemExit(f"reply: файл {image} не найден")
+            caption, rest = split_caption(text)
             with image.open("rb") as handle:
-                await bot.send_photo(chat_id, handle, caption=text[:1024], message_thread_id=topic, reply_to_message_id=quoted)
+                await bot.send_photo(chat_id, handle, caption=caption, message_thread_id=topic, reply_to_message_id=quoted)
+            for part in chunks(rest):
+                await bot.send_message(chat_id, part, message_thread_id=topic)
             await clear_seen(bot, chat_id, lane)
             return
         for part in chunks(text):
