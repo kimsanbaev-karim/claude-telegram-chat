@@ -188,6 +188,8 @@ class Router:
         entry["text"] = "\n".join(part for part in (entry["text"], spoken) if len(part) > 0)
 
     async def take(self, context: ContextTypes.DEFAULT_TYPE, message: Message, caption: str) -> None:
+        """«Глаза» ставятся первыми: распознавание минутного голосового выглядит как мёртвый канал."""
+        await self.mark_seen(context, message)
         kind, file_id, suffix = attachment(message)
         path = await self.download(context, file_id, suffix)
         entry: dict = {"kind": kind, "media": str(path), "text": caption}
@@ -196,7 +198,6 @@ class Router:
         if kind in AUDIO_KINDS:
             self.add_speech(entry, path)
         self.append(message, entry)
-        await self.mark_seen(context, message)
 
     async def on_attachment(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self.take(context, cast(Message, update.effective_message), "")
