@@ -153,7 +153,7 @@ class Router:
         query = cast(CallbackQuery, update.callback_query)
         await query.answer()
         message = cast(Message, query.message)
-        thread = int(cast(int, message.message_thread_id))
+        thread = thread_key(message)
         question_id, _, index = cast(str, query.data).partition(":")
         choice = ask.pending_question(thread)["options"][int(index)]
         ask.record_answer(question_id, choice)
@@ -166,7 +166,7 @@ class Router:
         text = cast(str, message.text)
         self.append(message, {"kind": "text", "text": text})
         await self.mark_seen(context, message)
-        waiting = ask.pending_question(int(thread_key(message)))
+        waiting = ask.pending_question(thread_key(message))
         if "question_id" in waiting:
             ask.record_answer(waiting["question_id"], text)
 

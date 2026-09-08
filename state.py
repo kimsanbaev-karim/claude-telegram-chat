@@ -7,6 +7,7 @@ Router помечает входящее реакцией «глаза» и кл
 
 import json
 import os
+import time
 from pathlib import Path
 
 
@@ -38,3 +39,23 @@ def take_pending(thread: str) -> list[int]:
     waiting = read_pending(thread)
     pending_path(thread).write_text("[]", encoding="utf-8")
     return waiting
+
+
+def marks_dir(name: str) -> Path:
+    path = state_dir() / name
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def mark(name: str, key: str) -> None:
+    """Отметить событие текущим временем: отчёт ушёл, ход закончился."""
+    payload = json.dumps({"at": time.time()})
+    (marks_dir(name) / f"{key}.json").write_text(payload, encoding="utf-8")
+
+
+def mark_time(name: str, key: str) -> float:
+    """Когда событие случилось в последний раз; ноль — не случалось никогда."""
+    path = marks_dir(name) / f"{key}.json"
+    if path.is_file() is False:
+        return 0.0
+    return float(json.loads(path.read_text(encoding="utf-8"))["at"])
