@@ -42,11 +42,30 @@ def remember_task(name: str, thread: int) -> int:
 
 
 @mcp.tool
-def reply(thread: int, text: str) -> str:
-    """Отправить сообщение в тему задачи. Длинный текст режется на части сам."""
+def reply(thread: int, text: str, reply_to: int = 0) -> str:
+    """ОТВЕТИТЬ на сообщение человека — ответ уходит цитатой, и видно, что прочитано именно оно.
+
+    Это способ по умолчанию: человек пишет в тему, агент отвечает сюда же. reply_to обычно
+    не нужен — без него цитируется самое свежее сообщение без ответа, а если отвечено на всё,
+    последнее пришедшее. Указывай reply_to, только когда отвечаешь не на свежее, а на давнее.
+    """
     load_dotenv(PROJECT_DIR / ".env")
-    asyncio.run(replying.send(thread, text, ""))
-    return "отправлено"
+    sent = asyncio.run(replying.send(thread, text, "", None, reply_to))
+
+    return replying.receipt(thread, sent)
+
+
+@mcp.tool
+def say(thread: int, text: str) -> str:
+    """НАПИСАТЬ своё сообщение в тему, без цитаты: агент начинает разговор сам.
+
+    Для отчёта о законченной работе, вопроса по своей инициативе, предупреждения. Если это
+    ответ на чьи-то слова — нужен reply, иначе в ленте не видно, что именно прочитано.
+    """
+    load_dotenv(PROJECT_DIR / ".env")
+    sent = asyncio.run(replying.send(thread, text, "", None, replying.NO_QUOTE))
+
+    return replying.receipt(thread, sent)
 
 
 @mcp.tool

@@ -9,12 +9,13 @@
 
 import argparse
 import asyncio
+import json
 import os
 import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
-from telegram import Bot
+from telegram import Bot, ReplyParameters
 from telegram.constants import FileSizeLimit
 
 import state
@@ -23,6 +24,7 @@ PROJECT_DIR = Path(__file__).resolve().parent
 TELEGRAM_TEXT_LIMIT = 4096
 TELEGRAM_CAPTION_LIMIT = 1024
 GENERAL_LANE = "general"
+NO_QUOTE = -1
 UPLOAD_SECONDS = 300
 ATTACHMENT_KINDS = ("voice", "photo", "video", "file")
 SHRINK_HINTS = {
@@ -98,7 +100,43 @@ def chosen_attachment(args: argparse.Namespace) -> tuple[str, str]:
     return "", ""
 
 
-async def send_attachment(bot: Bot, chat_id: int, kind: str, path: Path, caption: str, topic: int | None, quoted: int | None) -> None:
+def quoting(message_id: int) -> dict:
+    """Цитата на конкретное сообщение. Bot API 7.0 заменил reply_to_message_id на reply_parameters,
+    а allow_sending_without_reply внутри них оставляет ответ доставленным, если исходное удалили."""
+    if message_id < 1:
+        return {}
+
+    return {"reply_parameters": ReplyParameters(message_id=message_id, allow_sending_without_reply=True)}
+
+
+def last_unanswered(lane: str) -> int:
+    """Кому отвечаем, когда цитату не назвали руками: самое свежее сообщение без ответа,
+    а если отвечено уже на всё — последнее пришедшее, чтобы ответ всё равно был адресным."""
+    waiting = [message_id for message_id in state.read_pending(lane) if isinstance(message_id, int)]
+
+    if len(waiting) > 0:
+        return max(waiting)
+
+    return last_incoming(lane)
+
+
+def last_incoming(lane: str) -> int:
+    """Последнее сообщение ленты: лента пишется router и хранит всё, что человек прислал."""
+    path = state.state_dir() / "inbox" / f"{lane}.jsonl"
+
+    if path.is_file() is False:
+        return 0
+
+    for line in reversed(path.read_text(encoding="utf-8").splitlines()):
+        if len(line.strip()) == 0:
+            continue
+
+        return int(json.loads(line)["message_id"])
+
+    return 0
+
+
+async def send_attachment(bot: Bot, chat_id: int, kind: str, path: Path, caption: str, topic: int | None, quoted: int) -> int:
     senders = {
         "voice": bot.send_voice,
         "photo": bot.send_photo,
@@ -107,41 +145,57 @@ async def send_attachment(bot: Bot, chat_id: int, kind: str, path: Path, caption
     }
     streaming = {"supports_streaming": True} if kind == "video" else {}
     with path.open("rb") as handle:
-        await senders[kind](
+        delivered = await senders[kind](
             chat_id,
             handle,
             caption=caption,
             message_thread_id=topic,
-            reply_to_message_id=quoted,
             write_timeout=UPLOAD_SECONDS,
             read_timeout=UPLOAD_SECONDS,
+            **quoting(quoted),
             **streaming,
         )
+    return delivered.message_id
 
 
-async def send(thread: int, text: str, kind: str, path: Path | None, reply_to: int = 0) -> None:
+async def send(thread: int, text: str, kind: str, path: Path | None, reply_to: int = 0) -> list[int]:
+    """Возвращает id отправленных сообщений: молчаливый успех неотличим от отказа и провоцирует повторную отправку."""
     bot = Bot(require_env("AI_PAIR_BOT_TOKEN"))
     chat_id = int(require_env("AI_PAIR_CHAT_ID"))
-    quoted = reply_to if reply_to > 0 else None
     topic = thread if thread > 0 else None
     lane = lane_key(thread)
+    quoted = reply_to if reply_to != 0 else last_unanswered(lane)
+    sent = []
     async with bot:
         if path is not None:
             caption, rest = split_caption(text)
-            await send_attachment(bot, chat_id, kind, path, caption, topic, quoted)
+            sent.append(await send_attachment(bot, chat_id, kind, path, caption, topic, quoted))
             for part in chunks(rest):
-                await bot.send_message(chat_id, part, message_thread_id=topic)
+                delivered = await bot.send_message(chat_id, part, message_thread_id=topic)
+                sent.append(delivered.message_id)
             await clear_seen(bot, chat_id, lane)
-            return
+            return sent
         for part in chunks(text):
-            await bot.send_message(chat_id, part, message_thread_id=topic, reply_to_message_id=quoted)
+            delivered = await bot.send_message(chat_id, part, message_thread_id=topic, **quoting(quoted))
+            sent.append(delivered.message_id)
+            quoted = 0
         await clear_seen(bot, chat_id, lane)
+    return sent
 
 
 async def clear_seen(bot: Bot, chat_id: int, lane: str) -> None:
+    """Реакции снимаются только с сообщений чата: вводные из кода приходят меткой «файл:строка»."""
     state.mark("reported", lane)
-    for message_id in state.take_pending(lane):
-        await bot.set_message_reaction(chat_id, message_id, reaction=[])
+    for waiting in state.take_pending(lane):
+        if isinstance(waiting, int):
+            await bot.set_message_reaction(chat_id, waiting, reaction=[])
+
+
+def receipt(thread: int, sent: list[int]) -> str:
+    """Расписка о доставке: без неё повторный запуск выглядит как единственный способ убедиться, что сообщение ушло."""
+    where = f"тему {thread}" if thread > 0 else "General"
+    ids = ", ".join(str(message_id) for message_id in sent)
+    return f"reply: отправлено в {where}, сообщений {len(sent)} (id {ids})"
 
 
 def main() -> None:
@@ -153,11 +207,13 @@ def main() -> None:
     attachment.add_argument("--video", default="", help="путь к .mp4: уйдёт видео с плеером, текст станет подписью")
     attachment.add_argument("--file", default="", help="путь к любому файлу: уйдёт документом, текст станет подписью")
     parser.add_argument("--reply-to", type=int, default=0, dest="reply_to", help="message_id входящего сообщения: ответ уйдёт цитатой")
+    parser.add_argument("--no-quote", action="store_const", const=NO_QUOTE, default=0, dest="quote_off", help="сообщение от себя: без цитаты, ничего не отвечаем")
     args = parser.parse_args()
     load_dotenv(PROJECT_DIR / ".env")
     kind, name = chosen_attachment(args)
     path = checked_path(kind, name) if len(kind) > 0 else None
-    asyncio.run(send(args.thread, read_stdin_text(), kind, path, args.reply_to))
+    sent = asyncio.run(send(args.thread, read_stdin_text(), kind, path, args.reply_to or args.quote_off))
+    print(receipt(args.thread, sent))
 
 
 if __name__ == "__main__":

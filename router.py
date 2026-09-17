@@ -28,7 +28,7 @@ import state
 WHISPER_DEFAULT_URL = "http://127.0.0.1:8792"
 WHISPER_TIMEOUT_SECONDS = 300
 GENERAL_THREAD = "general"
-SEEN_REACTION = [ReactionTypeEmoji("👀")]
+TAKEN_REACTION = [ReactionTypeEmoji("👀")]
 CONNECT_TIMEOUT = 20.0
 READ_TIMEOUT = 30.0
 POLL_READ_TIMEOUT = 60.0
@@ -152,9 +152,10 @@ class Router:
         await handle.download_to_drive(custom_path=target)
         return target
 
-    async def mark_seen(self, context: ContextTypes.DEFAULT_TYPE, message: Message) -> None:
+    async def mark_taken(self, context: ContextTypes.DEFAULT_TYPE, message: Message) -> None:
+        """Роутер принял сообщение. Глаза ставит follow.py, когда строка уходит в сессию: иначе значок врёт при мёртвом наблюдателе."""
         state.add_pending(thread_key(message), message.message_id)
-        await context.bot.set_message_reaction(message.chat_id, message.message_id, reaction=SEEN_REACTION)
+        await context.bot.set_message_reaction(message.chat_id, message.message_id, reaction=TAKEN_REACTION)
 
     async def on_choice(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = cast(CallbackQuery, update.callback_query)
@@ -172,7 +173,7 @@ class Router:
         message = cast(Message, update.effective_message)
         text = cast(str, message.text)
         self.append(message, {"kind": "text", "text": text})
-        await self.mark_seen(context, message)
+        await self.mark_taken(context, message)
         waiting = ask.pending_question(thread_key(message))
         if "question_id" in waiting:
             ask.record_answer(waiting["question_id"], text)
@@ -195,8 +196,8 @@ class Router:
         entry["text"] = "\n".join(part for part in (entry["text"], spoken) if len(part) > 0)
 
     async def take(self, context: ContextTypes.DEFAULT_TYPE, message: Message, caption: str) -> None:
-        """«Глаза» ставятся первыми: распознавание минутного голосового выглядит как мёртвый канал."""
-        await self.mark_seen(context, message)
+        """Отметка о приёме ставится первой: распознавание минутного голосового выглядит как мёртвый канал."""
+        await self.mark_taken(context, message)
         kind, file_id, suffix = attachment(message)
         path = await self.download(context, file_id, suffix)
         entry: dict = {"kind": kind, "media": str(path), "text": caption}
