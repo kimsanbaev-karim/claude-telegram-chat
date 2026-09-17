@@ -106,7 +106,7 @@ AI_PAIR_ALLOWED_USERS=...  ваш numeric user id, через запятую
 
 Id группы и свой — от [@userinfobot](https://t.me/userinfobot) или из любого клиента. Кто попал в `AI_PAIR_ALLOWED_USERS`, тот управляет агентом: список держите коротким.
 
-Голосовые распознаёт внешний скрипт — любой, лишь бы печатал текст в stdout:
+Голосовые распознаёт внешний скрипт — любой, лишь бы печатал текст в stdout; готовый локальный сервис на faster-whisper: [whisper-speech-service](https://github.com/kimsanbaev-karim/whisper-speech-service).
 
 ```
 AI_PAIR_WHISPER_PYTHON=/путь/к/whisper/.venv/Scripts/python.exe
