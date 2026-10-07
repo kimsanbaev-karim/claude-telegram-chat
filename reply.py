@@ -17,6 +17,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from telegram import Bot, ReplyParameters
 from telegram.constants import FileSizeLimit
+from telegram.error import TelegramError
 
 import state
 
@@ -184,11 +185,19 @@ async def send(thread: int, text: str, kind: str, path: Path | None, reply_to: i
 
 
 async def clear_seen(bot: Bot, chat_id: int, lane: str) -> None:
-    """Реакции снимаются только с сообщений чата: вводные из кода приходят меткой «файл:строка»."""
+    """Реакции снимаются только с сообщений чата: вводные из кода приходят меткой «файл:строка».
+
+    Ответ к этому моменту уже доставлен, поэтому отказ при снятии реакции не роняет скрипт:
+    падение после доставки выглядит как неудача и толкает агента отправить ответ второй раз."""
     state.mark("reported", lane)
     for waiting in state.take_pending(lane):
         if isinstance(waiting, int):
-            await bot.set_message_reaction(chat_id, waiting, reaction=[])
+            try:
+                await bot.set_message_reaction(chat_id, waiting, reaction=[])
+            except TelegramError as error:
+                # Reaction_empty: нашей реакции на сообщении нет. Глаза не встали (follow.py глушит
+                # отказ) или сообщение адресовано другой машине и в её ленту не попало — снимать нечего.
+                sys.stderr.write(f"reply: реакцию с #{waiting} не снял: {error}\n")
 
 
 def receipt(thread: int, sent: list[int]) -> str:
