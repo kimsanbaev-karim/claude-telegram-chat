@@ -19,6 +19,8 @@ from dotenv import load_dotenv
 from telegram import Bot
 from telegram.request import HTTPXRequest
 
+import state
+
 PROJECT_DIR = Path(__file__).resolve().parent
 GENERAL_THREAD = 0
 CONNECT_TIMEOUT = 20.0
@@ -34,9 +36,9 @@ def require_env(name: str) -> str:
 
 
 def registry_path() -> Path:
-    state_dir = Path(os.environ.get("AI_PAIR_STATE_DIR", Path.home() / ".claude-telegram-chat"))
-    state_dir.mkdir(parents=True, exist_ok=True)
-    return state_dir / "threads.json"
+    path = state.registry_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def load_registry(path: Path) -> dict:
@@ -66,7 +68,7 @@ def remember(name: str, thread_id: int) -> None:
 
 
 def attach_session(session_id: str, thread_id: int) -> None:
-    path = registry_path().parent / "sessions"
+    path = state.state_dir() / "sessions"
     path.mkdir(parents=True, exist_ok=True)
     payload = json.dumps({"thread": thread_id}, ensure_ascii=False)
     (path / f"{session_id}.json").write_text(payload, encoding="utf-8")

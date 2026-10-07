@@ -2,9 +2,13 @@
 
     python -X utf8 follow.py --thread 42
 
-Печатает только то, что пришло ПОСЛЕ запуска: старая переписка событиями не считается.
+Сначала печатает непрочитанное — то, на что сессия ещё не ответила: платформа поднимает инстанс
+по факту сообщения, и оно уже лежит в ленте. Дальше — только то, что пришло после запуска.
 Строка ушла в сессию — на исходное сообщение ставятся «глаза»: значок означает «агент увидел»,
 а не «роутер принял», иначе при мёртвом наблюдателе он врёт.
+
+Две машины: AI_PAIR_FOLLOW_DIR=delivered — читать не ленту бота, а ленту, которую платформа
+наполняет только адресованными этой машине сообщениями.
 """
 
 import argparse
@@ -17,6 +21,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+import state
+
 PROJECT_DIR = Path(__file__).resolve().parent
 POLL_SECONDS = 1.0
 SEEN_REACTION = [{"type": "emoji", "emoji": "👀"}]
@@ -24,12 +30,20 @@ REACTION_TIMEOUT_SECONDS = 10
 
 
 def lane_path(thread: str) -> Path:
-    state_dir = Path(os.environ.get("AI_PAIR_STATE_DIR", Path.home() / ".claude-telegram-chat"))
-    return state_dir / "inbox" / f"{thread}.jsonl"
+    return state.state_dir() / os.environ.get("AI_PAIR_FOLLOW_DIR", "inbox") / f"{thread}.jsonl"
+
+
+def unread(path: Path, thread: str) -> list[dict]:
+    waiting = set(state.read_pending(thread))
+    if len(waiting) == 0 or path.is_file() is False:
+        return []
+    lines = [line for line in path.read_text(encoding="utf-8").splitlines() if len(line.strip()) > 0]
+    return [entry for entry in map(json.loads, lines) if entry.get("message_id") in waiting]
 
 
 def describe(entry: dict) -> str:
-    parts = [f"[ai-pair #{entry['message_id']}] {entry['text']}"]
+    sender = f" от {entry['from_bot']}" if "from_bot" in entry else ""
+    parts = [f"[ai-pair #{entry['message_id']}{sender}] {entry['text']}"]
     if "reply_to" in entry:
         parts.append(f"| в ответ на #{entry['reply_to']}")
     if "media" in entry:
@@ -62,8 +76,11 @@ def mark_seen(message_id: int) -> None:
         return
 
 
-def follow(path: Path) -> None:
+def follow(path: Path, thread: str) -> None:
     offset = start_offset(path)
+    for entry in unread(path, thread):
+        print(describe(entry), flush=True)
+        mark_seen(int(entry["message_id"]))
     while path.is_file() is False:
         time.sleep(POLL_SECONDS)
     with path.open("r", encoding="utf-8") as lane:
@@ -89,7 +106,7 @@ def main() -> None:
     parser.add_argument("--thread", required=True, help="ключ ленты: message_thread_id темы проекта или general")
     args = parser.parse_args()
     load_dotenv(PROJECT_DIR / ".env")
-    follow(lane_path(args.thread))
+    follow(lane_path(args.thread), args.thread)
 
 
 if __name__ == "__main__":

@@ -27,7 +27,7 @@ import state
 
 
 def lane_from_registry(topic: str) -> str:
-    registry = state.state_dir() / "threads.json"
+    registry = state.registry_path()
     if registry.is_file() is False:
         return ""
     thread = json.loads(registry.read_text(encoding="utf-8")).get(topic, 0)

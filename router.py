@@ -54,6 +54,8 @@ class Settings:
         self.chat_id = int(require_env("AI_PAIR_CHAT_ID"))
         self.allowed_users = parse_user_ids(require_env("AI_PAIR_ALLOWED_USERS"))
         self.state_dir = Path(os.environ.get("AI_PAIR_STATE_DIR", Path.home() / ".claude-telegram-chat"))
+        # две машины: сообщение адресует платформа, глаза ставит follow.py той, кому оно доставлено
+        self.intake_reaction = os.environ.get("AI_PAIR_INTAKE_REACTION", "1") == "1"
         self.inbox_dir = self.state_dir / "inbox"
         self.media_dir = self.state_dir / "media"
         self.frames_dir = self.state_dir / "frames"
@@ -80,13 +82,15 @@ def thread_key(message: Message) -> str:
 
 
 def quoted_fields(message: Message) -> dict:
-    try:
-        quoted = message.reply_to_message.message_id
-    except AttributeError:
+    """Ответ на корень темы — не цитата: в форуме им формально отвечает каждое сообщение темы."""
+    replied = message.reply_to_message
+    if replied is None or replied.message_id == message.message_thread_id:
         return {}
-    if quoted == message.message_thread_id:
-        return {}
-    return {"reply_to": quoted}
+    fields: dict = {"reply_to": replied.message_id}
+    author = replied.from_user
+    if author is not None and author.is_bot is True:
+        fields["reply_to_bot"] = f"@{author.username}"
+    return fields
 
 
 def document_kind(document: Document) -> tuple[str, str]:
@@ -138,6 +142,9 @@ class Router:
         thread = thread_key(message)
         entry["thread"] = thread
         entry["message_id"] = message.message_id
+        sender = message.from_user
+        if sender is not None and sender.is_bot is True:
+            entry["from_bot"] = f"@{sender.username}"
         entry.update(quoted_fields(message))
         entry["at"] = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
         path = self.settings.inbox_dir / f"{thread}.jsonl"
@@ -155,7 +162,8 @@ class Router:
     async def mark_taken(self, context: ContextTypes.DEFAULT_TYPE, message: Message) -> None:
         """Роутер принял сообщение. Глаза ставит follow.py, когда строка уходит в сессию: иначе значок врёт при мёртвом наблюдателе."""
         state.add_pending(thread_key(message), message.message_id)
-        await context.bot.set_message_reaction(message.chat_id, message.message_id, reaction=TAKEN_REACTION)
+        if self.settings.intake_reaction is True:
+            await context.bot.set_message_reaction(message.chat_id, message.message_id, reaction=TAKEN_REACTION)
 
     async def on_choice(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = cast(CallbackQuery, update.callback_query)
@@ -172,10 +180,11 @@ class Router:
     async def on_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         message = cast(Message, update.effective_message)
         text = cast(str, message.text)
-        self.append(message, {"kind": "text", "text": text})
+        entry = {"kind": "text", "text": text}
+        self.append(message, entry)
         await self.mark_taken(context, message)
         waiting = ask.pending_question(thread_key(message))
-        if "question_id" in waiting:
+        if "question_id" in waiting and "from_bot" not in entry:
             ask.record_answer(waiting["question_id"], text)
 
     def add_frames(self, entry: dict, path: Path) -> None:

@@ -37,7 +37,7 @@ def proceed(session_id: str) -> NoReturn:
 
 def lane_from_registry(topic: str) -> str:
     """Имя темы в номер: платформа знает имя при запуске, номер появляется при создании темы."""
-    registry = state.state_dir() / "threads.json"
+    registry = state.registry_path()
     if registry.is_file() is False:
         return ""
     thread = json.loads(registry.read_text(encoding="utf-8")).get(topic, 0)

@@ -15,6 +15,11 @@ def state_dir() -> Path:
     return Path(os.environ.get("AI_PAIR_STATE_DIR", Path.home() / ".claude-telegram-chat"))
 
 
+def registry_path() -> Path:
+    """Реестр тем отдельно от состояния: у двух машин он общий и лежит в синхронизируемом vault."""
+    return Path(os.environ.get("AI_PAIR_REGISTRY", state_dir() / "threads.json"))
+
+
 def pending_path(thread: str) -> Path:
     path = state_dir() / "pending"
     path.mkdir(parents=True, exist_ok=True)
