@@ -69,6 +69,26 @@ def say(thread: int, text: str) -> str:
 
 
 @mcp.tool
+def send_file(thread: int, path: str, kind: str = "file", text: str = "", reply_to: int = 0) -> str:
+    """ОТПРАВИТЬ файл в тему: картинку, видео, голосовое или любой документ. text станет подписью.
+
+    kind: photo — фото до 10 МБ, video — ролик с плеером до 50 МБ, voice — голосовое .ogg,
+    file — документом до 50 МБ. Ответ цитатой, как у reply; reply_to=0 — на свежее без ответа.
+    """
+    load_dotenv(PROJECT_DIR / ".env")
+    if kind not in replying.ATTACHMENT_KINDS:
+        raise ValueError(f"kind должен быть одним из {', '.join(replying.ATTACHMENT_KINDS)}")
+    try:
+        checked = replying.checked_path(kind, path)
+    except SystemExit as refusal:
+        # SystemExit уронил бы весь сервер, агенту нужен обычный отказ с подсказкой
+        raise ValueError(str(refusal)) from None
+    sent = asyncio.run(replying.send(thread, text, kind, checked, reply_to))
+
+    return replying.receipt(thread, sent)
+
+
+@mcp.tool
 def ask(thread: int, question: str, options: list[str], timeout_seconds: int = 1500) -> str:
     """Задать вопрос кнопками в тему задачи и дождаться выбора.
 
