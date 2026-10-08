@@ -17,6 +17,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from telegram import Bot, ReplyParameters
 from telegram.constants import FileSizeLimit
+from telegram.error import BadRequest
 
 import state
 
@@ -65,7 +66,7 @@ def split_caption(text: str) -> tuple[str, str]:
 
 def lane_key(thread: int) -> str:
     """Ключ ленты: у темы это её id, у General — общее имя, как его пишет router."""
-    if thread > 0:
+    if thread > 0 and os.environ.get("AI_PAIR_ONE_LANE", "") != "1":
         return str(thread)
     return GENERAL_LANE
 
@@ -188,7 +189,12 @@ async def clear_seen(bot: Bot, chat_id: int, lane: str) -> None:
     state.mark("reported", lane)
     for waiting in state.take_pending(lane):
         if isinstance(waiting, int):
-            await bot.set_message_reaction(chat_id, waiting, reaction=[])
+            try:
+                await bot.set_message_reaction(chat_id, waiting, reaction=[])
+            except BadRequest as error:
+                # «глаз» не было — снимать нечего; ответ к этому моменту уже ушёл
+                if "Reaction_empty" not in error.message:
+                    raise
 
 
 def receipt(thread: int, sent: list[int]) -> str:
