@@ -1,4 +1,5 @@
 .env
+.env.*
 *.log
 .venv/
 __pycache__/
@@ -7,3 +8,4 @@ icon.png
 inbox/
 media/
 frames/
+!.env.example

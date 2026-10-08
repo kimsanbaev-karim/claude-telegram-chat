@@ -54,6 +54,8 @@ class Settings:
         self.token = require_env("AI_PAIR_BOT_TOKEN")
         self.chat_id = int(require_env("AI_PAIR_CHAT_ID"))
         self.allowed_users = parse_user_ids(require_env("AI_PAIR_ALLOWED_USERS"))
+        # чат команды: бот откликается только на свой тег или ответ на своё сообщение
+        self.bot_username = os.environ.get("AI_PAIR_MENTION_ONLY", "").strip().lstrip("@")
         self.state_dir = Path(os.environ.get("AI_PAIR_STATE_DIR", Path.home() / ".claude-telegram-chat"))
         # две машины: сообщение адресует платформа, глаза ставит follow.py той, кому оно доставлено
         self.intake_reaction = os.environ.get("AI_PAIR_INTAKE_REACTION", "1") == "1"
@@ -70,16 +72,40 @@ def require_env(name: str) -> str:
 
 
 def parse_user_ids(raw: str) -> frozenset[int]:
+    """«*» — писать может любой участник чата: пустое множество значит «без белого списка»."""
+    if raw.strip() == "*":
+        return frozenset()
     ids = {int(part.strip()) for part in raw.split(",") if len(part.strip()) > 0}
     if len(ids) == 0:
-        raise SystemExit("router: AI_PAIR_ALLOWED_USERS пуст — некому писать в канал")
+        raise SystemExit("router: AI_PAIR_ALLOWED_USERS пуст — некому писать в канал; «*» — любой участник")
     return frozenset(ids)
 
 
+class AddressedToBot(filters.MessageFilter):
+    """Тег бота в тексте или подписи, либо ответ на его сообщение."""
+
+    def __init__(self, username: str) -> None:
+        super().__init__()
+        self.username = username.lower()
+        self.mention = filters.Mention(username)
+
+    def filter(self, message: Message) -> bool:
+        replied = message.reply_to_message
+        author = replied.from_user if replied is not None else None
+        if author is not None and f"{author.username}".lower() == self.username:
+            return True
+        return bool(self.mention.filter(message))
+
+
 def thread_key(message: Message) -> str:
-    if message.is_topic_message is True:
+    # чат команды: одна лента на весь форум, у агента один наблюдатель; тему он берёт из поля topic
+    if message.is_topic_message is True and one_lane() is False:
         return str(message.message_thread_id)
     return GENERAL_THREAD
+
+
+def one_lane() -> bool:
+    return os.environ.get("AI_PAIR_ONE_LANE", "") == "1"
 
 
 def quoted_fields(message: Message) -> dict:
@@ -142,10 +168,15 @@ class Router:
     def append(self, message: Message, entry: dict) -> None:
         thread = thread_key(message)
         entry["thread"] = thread
+        if message.is_topic_message is True and one_lane() is True:
+            entry["topic"] = message.message_thread_id
         entry["message_id"] = message.message_id
         sender = message.from_user
         if sender is not None and sender.is_bot is True:
             entry["from_bot"] = f"@{sender.username}"
+        elif sender is not None and len(self.settings.allowed_users) == 0:
+            # без белого списка агенту надо знать, кто из участников к нему обращается
+            entry["from_user"] = f"@{sender.username}" if sender.username else sender.full_name
         entry.update(quoted_fields(message))
         entry["at"] = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
         path = self.settings.inbox_dir / f"{thread}.jsonl"
@@ -231,7 +262,11 @@ def main() -> None:
     load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
     settings = Settings()
     router = Router(settings)
-    scope = filters.Chat(chat_id=settings.chat_id) & filters.User(user_id=settings.allowed_users)
+    scope = filters.Chat(chat_id=settings.chat_id)
+    if len(settings.allowed_users) > 0:
+        scope = scope & filters.User(user_id=settings.allowed_users)
+    if len(settings.bot_username) > 0:
+        scope = scope & AddressedToBot(settings.bot_username)
 
     api_client = HTTPXRequest(connect_timeout=CONNECT_TIMEOUT, read_timeout=READ_TIMEOUT, pool_timeout=POOL_TIMEOUT)
     polling_client = HTTPXRequest(connect_timeout=CONNECT_TIMEOUT, read_timeout=POLL_READ_TIMEOUT, pool_timeout=POOL_TIMEOUT)

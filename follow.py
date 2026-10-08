@@ -45,8 +45,11 @@ def unread(path: Path, thread: str) -> list[dict]:
 
 
 def describe(entry: dict) -> str:
-    sender = f" от {entry['from_bot']}" if "from_bot" in entry else ""
+    author = entry.get("from_bot", entry.get("from_user", ""))
+    sender = f" от {author}" if len(author) > 0 else ""
     parts = [f"[ai-pair #{entry['message_id']}{sender}] {entry['text']}"]
+    if "topic" in entry:
+        parts.append(f"| тема {entry['topic']}")
     if "reply_to" in entry:
         parts.append(f"| в ответ на #{entry['reply_to']}")
     if "media" in entry:

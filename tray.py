@@ -16,7 +16,7 @@ import pystray
 import win32api
 import win32event
 import winerror
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
 from icon import make_icon_image
 
@@ -50,18 +50,20 @@ def write_log(message: str) -> None:
 
 
 class ProcessSupervisor:
-    def __init__(self, name: str, command: list[str], workdir: Path) -> None:
+    def __init__(self, name: str, command: list[str], workdir: Path, env: dict[str, str] | None = None, log_path: Path = LOG_PATH) -> None:
         self.name = name
         self.command = command
         self.workdir = workdir
+        self.env = env
+        self.log_path = log_path
         self.stopping = threading.Event()
         self.process = self.spawn()
         threading.Thread(target=self.watch, daemon=True).start()
 
     def spawn(self) -> subprocess.Popen:
         write_log(f"запускаю {self.name}")
-        log = LOG_PATH.open("a", encoding="utf-8", buffering=1)
-        return subprocess.Popen(self.command, cwd=self.workdir, stdout=log, stderr=log, creationflags=subprocess.CREATE_NO_WINDOW)
+        log = self.log_path.open("a", encoding="utf-8", buffering=1)
+        return subprocess.Popen(self.command, cwd=self.workdir, env=self.env, stdout=log, stderr=log, creationflags=subprocess.CREATE_NO_WINDOW)
 
     def watch(self) -> None:
         while self.stopping.is_set() is False:
@@ -88,7 +90,16 @@ class ProcessSupervisor:
 def start_supervisors() -> list[ProcessSupervisor]:
     router_python = PROJECT_DIR / ".venv" / "Scripts" / "python.exe"
     router = [str(router_python), "-X", "utf8", str(PROJECT_DIR / "router.py")]
-    return [ProcessSupervisor("router", router, PROJECT_DIR)]
+    supervisors = [ProcessSupervisor("router", router, PROJECT_DIR)]
+    # .env.<имя> — ещё один бот со своим чатом: свой токен, свой поллер, свой лог router-<имя>.log.
+    # Его переменные уже в окружении, поэтому load_dotenv(.env) внутри router их не перетрёт.
+    for extra in sorted(PROJECT_DIR.glob(".env.*")):
+        name = extra.name.removeprefix(".env.")
+        if name == "example":
+            continue
+        env = {**os.environ, **{key: value for key, value in dotenv_values(extra).items() if value is not None}}
+        supervisors.append(ProcessSupervisor(f"router-{name}", router, PROJECT_DIR, env, PROJECT_DIR / f"router-{name}.log"))
+    return supervisors
 
 
 def main() -> None:
