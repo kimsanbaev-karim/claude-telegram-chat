@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import cast
 
 from dotenv import load_dotenv
-from telegram import Animation, Audio, CallbackQuery, Document, Message, PhotoSize, ReactionTypeEmoji
+from telegram import Animation, Audio, CallbackQuery, Document, Message, MessageEntity, PhotoSize, ReactionTypeEmoji
 from telegram import Update, Video, VideoNote, Voice
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
@@ -95,6 +95,46 @@ class AddressedToBot(filters.MessageFilter):
         if author is not None and f"{author.username}".lower() == self.username:
             return True
         return bool(self.mention.filter(message))
+
+
+def addressed_here(message: Message, me: str) -> bool:
+    """Кому сообщение (решение Карима 21.10, #9667, Unit-AI-System):
+    есть тег или reply — тому, чей тег или чьё сообщение; нет ни того ни другого — сессии темы,
+    если задача темы не отдана юниту (поле units в task.md), иначе юниту.
+    """
+    # parse_entities режет текст по UTF-16, как считает Telegram; у подписи вложения свои сущности
+    entities = message.parse_caption_entities if message.caption else message.parse_entities
+    tagged = {mention.lstrip("@").lower() for mention in entities([MessageEntity.MENTION]).values()}
+    tagged |= {f"{e.user.username}".lower() for e in entities([MessageEntity.TEXT_MENTION]) if e.user}
+    replied = message.reply_to_message
+    replied_author = ""
+    if replied is not None and replied.message_id != message.message_thread_id and replied.from_user is not None:
+        replied_author = f"{replied.from_user.username}".lower()
+    if tagged or replied_author:
+        return me.lower() in tagged or replied_author == me.lower()
+    return not topic_has_units(message.message_thread_id if message.is_topic_message else None)
+
+
+def topic_has_units(thread: int | None) -> bool:
+    """Задача темы отдана юниту: в реестре тем ищем «проект#задача», в её task.md — непустое поле units."""
+    if thread is None:
+        return False
+    registry = state.registry_path()
+    try:
+        topics = json.loads(registry.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    key = next((name for name, number in topics.items() if number == thread and "#" in name), None)
+    if key is None:
+        return False
+    project, task = key.split("#", 1)
+    task_md = registry.parent.parent / "projects" / project / "tasks" / task / "task.md"
+    try:
+        head = task_md.read_text(encoding="utf-8").split("---", 2)
+    except OSError:
+        return False
+    frontmatter = head[1] if len(head) > 2 else ""
+    return any(line.startswith("units:") and len(line[6:].strip()) > 0 for line in frontmatter.splitlines())
 
 
 def thread_key(message: Message) -> str:
@@ -211,6 +251,8 @@ class Router:
 
     async def on_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         message = cast(Message, update.effective_message)
+        if not addressed_here(message, context.bot.username):
+            return
         text = cast(str, message.text)
         entry = {"kind": "text", "text": text}
         self.append(message, entry)
@@ -238,6 +280,8 @@ class Router:
 
     async def take(self, context: ContextTypes.DEFAULT_TYPE, message: Message, caption: str) -> None:
         """Отметка о приёме ставится первой: распознавание минутного голосового выглядит как мёртвый канал."""
+        if not addressed_here(message, context.bot.username):
+            return
         await self.mark_taken(context, message)
         kind, file_id, suffix = attachment(message)
         path = await self.download(context, file_id, suffix)
