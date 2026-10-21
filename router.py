@@ -260,6 +260,9 @@ def main() -> None:
     # override: трей грузит .env один раз при старте и передаёт окружение роутеру — без него правка .env
     # доходила бы до роутера только после перезапуска трея, а «перезапустить router» её не видел бы
     load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
+    # доп. бот: его .env.<имя> важнее основного .env, иначе он поллит чужой токен
+    if os.environ.get("AI_PAIR_EXTRA_ENV"):
+        load_dotenv(os.environ["AI_PAIR_EXTRA_ENV"], override=True)
     settings = Settings()
     router = Router(settings)
     scope = filters.Chat(chat_id=settings.chat_id)

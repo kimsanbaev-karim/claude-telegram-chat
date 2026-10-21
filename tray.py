@@ -92,12 +92,13 @@ def start_supervisors() -> list[ProcessSupervisor]:
     router = [str(router_python), "-X", "utf8", str(PROJECT_DIR / "router.py")]
     supervisors = [ProcessSupervisor("router", router, PROJECT_DIR)]
     # .env.<имя> — ещё один бот со своим чатом: свой токен, свой поллер, свой лог router-<имя>.log.
-    # Его переменные уже в окружении, поэтому load_dotenv(.env) внутри router их не перетрёт.
+    # router сам перечитывает .env с override, поэтому путь к своему .env.<имя> получает в AI_PAIR_EXTRA_ENV
+    # и накладывает его поверх — иначе доп. бот поллил бы токен основного и оба падали бы в Conflict (21.10).
     for extra in sorted(PROJECT_DIR.glob(".env.*")):
         name = extra.name.removeprefix(".env.")
         if name == "example":
             continue
-        env = {**os.environ, **{key: value for key, value in dotenv_values(extra).items() if value is not None}}
+        env = {**os.environ, **{key: value for key, value in dotenv_values(extra).items() if value is not None}, "AI_PAIR_EXTRA_ENV": str(extra)}
         supervisors.append(ProcessSupervisor(f"router-{name}", router, PROJECT_DIR, env, PROJECT_DIR / f"router-{name}.log"))
     return supervisors
 
