@@ -6,6 +6,7 @@
 
 import json
 import os
+import platform
 import subprocess
 import sys
 import urllib.error
@@ -225,7 +226,9 @@ class Router:
 
 
 def main() -> None:
-    load_dotenv(Path(__file__).resolve().parent / ".env")
+    # override: трей грузит .env один раз при старте и передаёт окружение роутеру — без него правка .env
+    # доходила бы до роутера только после перезапуска трея, а «перезапустить router» её не видел бы
+    load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
     settings = Settings()
     router = Router(settings)
     scope = filters.Chat(chat_id=settings.chat_id) & filters.User(user_id=settings.allowed_users)
@@ -243,7 +246,19 @@ def main() -> None:
 
     sys.stderr.write(f"router: слушаю чат {settings.chat_id}, ленты в {settings.inbox_dir}\n")
     sys.stderr.flush()
+    without_wmi()
     application.run_polling(allowed_updates=["message", "callback_query"])
+
+
+def without_wmi() -> None:
+    """run_polling спрашивает platform.system(), а Python 3.12 узнаёт версию Windows через WMI: зависшая служба
+    вешает роутер до первого getUpdates навсегда (замерено 07.10.2026, cpython gh-112278). OSError — штатный
+    повод для platform взять версию из sys.getwindowsversion().
+    ponytail: подмена приватного platform._wmi_query; убрать, когда CPython перестанет ходить в WMI за версией."""
+    def refuse(*keys: str) -> None:
+        raise OSError("WMI не используем: зависшая служба вешает platform.system()")
+
+    platform._wmi_query = refuse  # type: ignore[attr-defined]
 
 
 if __name__ == "__main__":
