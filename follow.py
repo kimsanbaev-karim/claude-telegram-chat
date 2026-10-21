@@ -27,6 +27,9 @@ PROJECT_DIR = Path(__file__).resolve().parent
 POLL_SECONDS = 1.0
 SEEN_REACTION = [{"type": "emoji", "emoji": "👀"}]
 REACTION_TIMEOUT_SECONDS = 10
+# платформа читает following/<лента>.json; держать в согласии с FollowerStaleSeconds в ChannelBindings.cs
+FOLLOWING_MARKS = "following"
+HEARTBEAT_SECONDS = 10
 
 
 def lane_path(thread: str) -> Path:
@@ -78,21 +81,31 @@ def mark_seen(message_id: int) -> None:
 
 def follow(path: Path, thread: str) -> None:
     offset = start_offset(path)
+    state.mark(FOLLOWING_MARKS, thread)
     for entry in unread(path, thread):
         print(describe(entry), flush=True)
         mark_seen(int(entry["message_id"]))
     while path.is_file() is False:
+        heartbeat(thread)
         time.sleep(POLL_SECONDS)
     with path.open("r", encoding="utf-8") as lane:
         lane.seek(offset)
         while True:
             raw = lane.readline()
             if len(raw.strip()) == 0:
+                heartbeat(thread)
                 time.sleep(POLL_SECONDS)
                 continue
             entry = json.loads(raw.strip())
             print(describe(entry), flush=True)
             mark_seen(int(entry["message_id"]))
+
+
+def heartbeat(thread: str) -> None:
+    """Метка «ленту слушают»: живая сессия Claude ещё не значит живой наблюдатель — Monitor истекает
+    через 30 минут, и платформа по этой метке отличает слушающий инстанс от оглохшего."""
+    if time.time() - state.mark_time(FOLLOWING_MARKS, thread) >= HEARTBEAT_SECONDS:
+        state.mark(FOLLOWING_MARKS, thread)
 
 
 def start_offset(path: Path) -> int:
