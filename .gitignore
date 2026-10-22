@@ -9,3 +9,5 @@ inbox/
 media/
 frames/
 !.env.example
+*.env
+node_modules/
