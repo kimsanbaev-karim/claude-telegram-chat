@@ -25,7 +25,7 @@ LOG_PATH = PROJECT_DIR / "router.log"
 MUTEX_NAME = "Global\\claude-telegram-chat-tray"
 RESTART_DELAY_SECONDS = 5
 POLL_SECONDS = 1.0
-REQUIRED_ENV = ("AI_PAIR_BOT_TOKEN", "AI_PAIR_CHAT_ID", "AI_PAIR_ALLOWED_USERS")
+REQUIRED_ENV = ("AI_PAIR_BOT_TOKEN", "AI_PAIR_CHAT_ID")
 
 
 def ensure_single_instance() -> None:

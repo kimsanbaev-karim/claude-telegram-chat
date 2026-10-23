@@ -53,7 +53,6 @@ class Settings:
     def __init__(self) -> None:
         self.token = require_env("AI_PAIR_BOT_TOKEN")
         self.chat_id = int(require_env("AI_PAIR_CHAT_ID"))
-        self.allowed_users = parse_user_ids(require_env("AI_PAIR_ALLOWED_USERS"))
         # чат команды: бот откликается только на свой тег или ответ на своё сообщение
         self.bot_username = os.environ.get("AI_PAIR_MENTION_ONLY", "").strip().lstrip("@")
         self.state_dir = Path(os.environ.get("AI_PAIR_STATE_DIR", Path.home() / ".claude-telegram-chat"))
@@ -69,16 +68,6 @@ def require_env(name: str) -> str:
     if len(value) == 0:
         raise SystemExit(f"router: переменная {name} не задана — запуск невозможен")
     return value
-
-
-def parse_user_ids(raw: str) -> frozenset[int]:
-    """«*» — писать может любой участник чата: пустое множество значит «без белого списка»."""
-    if raw.strip() == "*":
-        return frozenset()
-    ids = {int(part.strip()) for part in raw.split(",") if len(part.strip()) > 0}
-    if len(ids) == 0:
-        raise SystemExit("router: AI_PAIR_ALLOWED_USERS пуст — некому писать в канал; «*» — любой участник")
-    return frozenset(ids)
 
 
 class AddressedToBot(filters.MessageFilter):
@@ -214,8 +203,8 @@ class Router:
         sender = message.from_user
         if sender is not None and sender.is_bot is True:
             entry["from_bot"] = f"@{sender.username}"
-        elif sender is not None and len(self.settings.allowed_users) == 0:
-            # без белого списка агенту надо знать, кто из участников к нему обращается
+        elif sender is not None:
+            # агенту надо знать, кто из участников к нему обращается
             entry["from_user"] = f"@{sender.username}" if sender.username else sender.full_name
         entry.update(quoted_fields(message))
         entry["at"] = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
@@ -310,8 +299,6 @@ def main() -> None:
     settings = Settings()
     router = Router(settings)
     scope = filters.Chat(chat_id=settings.chat_id)
-    if len(settings.allowed_users) > 0:
-        scope = scope & filters.User(user_id=settings.allowed_users)
     if len(settings.bot_username) > 0:
         scope = scope & AddressedToBot(settings.bot_username)
 
