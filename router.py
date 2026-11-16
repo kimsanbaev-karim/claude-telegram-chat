@@ -104,6 +104,19 @@ def addressed_here(message: Message, me: str) -> bool:
     return not topic_has_units(message.message_thread_id if message.is_topic_message else None)
 
 
+def addressed_explicitly(message: Message, me: str) -> bool:
+    """Прямое обращение к боту: тег @me или reply на его сообщение (не дефолт «сессии темы»).
+    По нему оркестратору зеркалим сообщение из любой темы в ленту general — чтобы дежурный инстанс точно получил."""
+    entities = message.parse_caption_entities if message.caption else message.parse_entities
+    tagged = {mention.lstrip("@").lower() for mention in entities([MessageEntity.MENTION]).values()}
+    tagged |= {f"{e.user.username}".lower() for e in entities([MessageEntity.TEXT_MENTION]) if e.user}
+    if me.lower() in tagged:
+        return True
+    replied = message.reply_to_message
+    return (replied is not None and replied.message_id != message.message_thread_id
+            and replied.from_user is not None and f"{replied.from_user.username}".lower() == me.lower())
+
+
 def topic_has_units(thread: int | None) -> bool:
     """Задача темы отдана юниту: в реестре тем ищем «проект#задача», в её task.md — непустое поле units."""
     if thread is None:
@@ -194,7 +207,7 @@ class Router:
         settings.inbox_dir.mkdir(parents=True, exist_ok=True)
         settings.media_dir.mkdir(parents=True, exist_ok=True)
 
-    def append(self, message: Message, entry: dict) -> None:
+    def append(self, message: Message, entry: dict, me: str = "") -> None:
         thread = thread_key(message)
         entry["thread"] = thread
         if message.is_topic_message is True and one_lane() is True:
@@ -213,6 +226,17 @@ class Router:
             lane.write(json.dumps(entry, ensure_ascii=False) + "\n")
         sys.stderr.write(f"router: {thread} <- {entry['kind']} #{message.message_id}\n")
         sys.stderr.flush()
+        # оркестратору — его адресные сообщения из любой темы дублируем в general (с пометкой темы), чтобы дежурный
+        # инстанс точно получил и ответил в исходную тему; ленту самой темы не трогаем — её слушает сессия задачи (Карим 04.11)
+        if thread != GENERAL_THREAD and me and addressed_explicitly(message, me):
+            mirror = dict(entry)
+            mirror["thread"] = GENERAL_THREAD
+            mirror["topic"] = message.message_thread_id
+            general = self.settings.inbox_dir / f"{GENERAL_THREAD}.jsonl"
+            with general.open("a", encoding="utf-8", newline="\n") as lane:
+                lane.write(json.dumps(mirror, ensure_ascii=False) + "\n")
+            sys.stderr.write(f"router: {GENERAL_THREAD} <- зеркало из темы {message.message_thread_id} #{message.message_id}\n")
+            sys.stderr.flush()
 
     async def download(self, context: ContextTypes.DEFAULT_TYPE, file_id: str, suffix: str) -> Path:
         handle = await context.bot.get_file(file_id)
@@ -244,7 +268,7 @@ class Router:
             return
         text = cast(str, message.text)
         entry = {"kind": "text", "text": text}
-        self.append(message, entry)
+        self.append(message, entry, context.bot.username)
         await self.mark_taken(context, message)
         waiting = ask.pending_question(thread_key(message))
         if "question_id" in waiting and "from_bot" not in entry:
@@ -279,7 +303,7 @@ class Router:
             self.add_frames(entry, path)
         if kind in AUDIO_KINDS:
             self.add_speech(entry, path)
-        self.append(message, entry)
+        self.append(message, entry, context.bot.username)
 
     async def on_attachment(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self.take(context, cast(Message, update.effective_message), "")
